@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MDP Grid World — Simulation Interactive</title>
+<style>
+  :root {
+    --bg:      #0f0f1a;
+    --panel:   #16213e;
+    --cell:    #1a2744;
+    --border:  #2a3a6e;
+    --accent:  #00d4ff;
+    --green:   #00ff9f;
+    --yellow:  #ffd700;
+    --red:     #ff4757;
+    --white:   #e8e8ff;
+    --muted:   #7a88bb;
+    --robot:   #00d4ff;
+    --shadow:  rgba(0,212,255,0.4);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--white);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 20px;
+  }
+  h1 {
+    font-size: 1.5rem; letter-spacing: 2px;
+    color: var(--accent);
+    text-shadow: 0 0 20px var(--shadow);
+    margin-bottom: 6px; text-align: center;
+  }
+  .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; text-align: center; }
+
+  /* ── Layout ─────────────────────────────────────────────────────────────── */
+  .main { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+
+  /* ── Grid ───────────────────────────────────────────────────────────────── */
+  #grid-wrap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px; padding: 20px;
+    box-shadow: 0 0 40px rgba(0,212,255,0.08);
+  }
+  #grid-title {
+    font-size: 0.9rem; color: var(--muted); margin-bottom: 14px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #episode-badge {
+    background: var(--accent); color: #000;
+    border-radius: 999px; padding: 2px 10px;
+    font-size: 0.8rem; font-weight: bold;
+  }
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(4, 110px);
+    grid-template-rows: repeat(3, 100px);
+    gap: 6px;
+  }
+  .cell {
+    border-radius: 10px;
+    border: 2px solid var(--border);
+    position: relative;
+    cursor: default;
+    transition: border-color 0.3s, box-shadow 0.3s;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .cell .coords {
+    position: absolute; top: 4px; left: 6px;
+    font-size: 0.6rem; color: rgba(255,255,255,0.35);
+  }
+  .cell .v-star {
+    font-size: 0.75rem; font-weight: bold; color: white;
+    text-shadow: 0 1px 4px #000;
+    margin-bottom: 2px;
+  }
+  .cell .arrow {
+    font-size: 1.6rem; line-height: 1;
+    text-shadow: 0 2px 6px #000;
+  }
+  .cell .reward-label {
+    position: absolute; bottom: 5px;
+    font-size: 0.72rem; font-weight: bold;
+  }
+  .cell.obstacle {
+    background: #1c1c2e !important;
+    border-color: #333 !important;
+    color: #555;
+  }
+  .cell.obstacle .label { font-size: 0.8rem; color: #555; font-weight: bold; }
+  .cell.goal   { border-color: var(--yellow) !important; border-width: 3px; }
+  .cell.trap   { border-color: var(--red)    !important; border-width: 3px; }
+  .cell.robot  { box-shadow: 0 0 24px var(--shadow); border-color: var(--accent) !important; }
+  .cell.visited { opacity: 0.75; }
+
+  .robot-icon {
+    position: absolute;
+    font-size: 2rem;
+    z-index: 10;
+    transition: opacity 0.2s;
+    filter: drop-shadow(0 0 8px var(--accent));
+    animation: pulse 0.8s ease-in-out infinite alternate;
+  }
+  @keyframes pulse {
+    from { transform: scale(1);    filter: drop-shadow(0 0 8px var(--accent)); }
+    to   { transform: scale(1.12); filter: drop-shadow(0 0 16px var(--accent)); }
+  }
+
+  /* path trail */
+  #trail-svg {
+    position: absolute; top: 0; left: 0;
+    pointer-events: none; z-index: 5;
+  }
+
+  /* ── Stats panel ──────────────────────────────────────────────────────────── */
+  #stats-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px; padding: 20px;
+    width: 230px;
+    box-shadow: 0 0 40px rgba(0,212,255,0.05);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .stat-block { display: flex; flex-direction: column; gap: 6px; }
+  .stat-block h3 { font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
+                   letter-spacing: 1.5px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; }
+  .stat-row .label { color: var(--muted); font-size: 0.82rem; }
+  .stat-row .value { font-weight: bold; }
+  .val-accent { color: var(--accent); }
+  .val-green  { color: var(--green);  }
+  .val-yellow { color: var(--yellow); }
+  .val-red    { color: var(--red);    }
+  .val-white  { color: var(--white);  }
+
+  #reward-bar-bg {
+    width: 100%; height: 8px; background: #2a2a4a;
+    border-radius: 4px; overflow: hidden;
+  }
+  #reward-bar { height: 100%; border-radius: 4px; transition: width 0.4s, background 0.4s; }
+
+  .goal-msg {
+    text-align: center; padding: 8px;
+    background: rgba(255,215,0,0.1);
+    border: 1px solid var(--yellow);
+    border-radius: 8px; font-weight: bold;
+    color: var(--yellow); font-size: 0.9rem;
+    display: none;
+  }
+
+  /* ── Controls ─────────────────────────────────────────────────────────────── */
+  #controls {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px; padding: 16px 24px;
+    margin-top: 16px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+    justify-content: center;
+    box-shadow: 0 0 40px rgba(0,212,255,0.05);
+  }
+  button {
+    background: var(--cell);
+    border: 1px solid var(--border);
+    color: var(--white);
+    border-radius: 8px; padding: 8px 18px;
+    cursor: pointer; font-size: 0.9rem;
+    transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+  }
+  button:hover { border-color: var(--accent); box-shadow: 0 0 10px var(--shadow); }
+  button#btn-play { background: var(--accent); color: #000; font-weight: bold; border-color: var(--accent); }
+  button#btn-play:hover { background: #00b8d9; }
+  button#btn-reset { border-color: var(--muted); }
+
+  .ctrl-group { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+  .ctrl-group input[type=range] { width: 120px; accent-color: var(--accent); }
+  .ctrl-group label { display: flex; justify-content: space-between; }
+
+  /* ── Legend ──────────────────────────────────────────────────────────────── */
+  #legend {
+    margin-top: 14px;
+    display: flex; gap: 18px; font-size: 0.78rem; color: var(--muted); flex-wrap: wrap; justify-content: center;
+  }
+  .leg-item { display: flex; align-items: center; gap: 5px; }
+  .leg-color { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #555; }
+
+  /* ── V* heatmap coloring ─────────────────────────────────────────────────── */
+  /* Set via JS inline style */
+</style>
+</head>
+<body>
+
+<h1>⬛ MDP Grid World — Simulation Interactive</h1>
+<p class="subtitle">
+  Value Iteration (Python → JS) · γ=0.9 · ε=10⁻⁶ · Transitions stochastiques (80/10/10)
+</p>
+
+<div class="main">
+
+  <!-- Grid -->
+  <div id="grid-wrap">
+    <div id="grid-title">
+      <span>Grille 3×4 · <span id="lbl-iter">—</span> itérations VI</span>
+      <span id="episode-badge">Épisode 1</span>
+    </div>
+    <div style="position:relative; display:inline-block;">
+      <div id="grid"></div>
+      <canvas id="trail-canvas" style="position:absolute;top:0;left:0;pointer-events:none;z-index:5;"></canvas>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div id="stats-panel">
+    <div class="stat-block">
+      <h3>Navigation</h3>
+      <div class="stat-row"><span class="label">Étape</span>        <span class="value val-accent" id="s-step">0</span></div>
+      <div class="stat-row"><span class="label">État actuel</span>  <span class="value val-white" id="s-state">—</span></div>
+      <div class="stat-row"><span class="label">V*(état)</span>     <span class="value val-green" id="s-vstar">—</span></div>
+      <div class="stat-row"><span class="label">Action π*</span>    <span class="value val-yellow" id="s-action">—</span></div>
+    </div>
+
+    <div class="stat-block">
+      <h3>Récompenses</h3>
+      <div class="stat-row"><span class="label">Immédiate</span>    <span class="value" id="s-reward">0</span></div>
+      <div class="stat-row"><span class="label">Cumulée</span>      <span class="value val-yellow" id="s-cumrew">0.00</span></div>
+      <div id="reward-bar-bg"><div id="reward-bar" style="width:0%;background:var(--green)"></div></div>
+    </div>
+
+    <div class="stat-block">
+      <h3>Paramètres MDP</h3>
+      <div class="stat-row"><span class="label">γ (escompte)</span>    <span class="value val-accent" id="s-gamma">0.9</span></div>
+      <div class="stat-row"><span class="label">|S| états</span>        <span class="value">11</span></div>
+      <div class="stat-row"><span class="label">|A| actions</span>      <span class="value">4</span></div>
+      <div class="stat-row"><span class="label">Iter. VI</span>         <span class="value val-accent" id="s-vi-iter">—</span></div>
+      <div class="stat-row"><span class="label">V*(1,1)</span>          <span class="value val-green" id="s-v11">—</span></div>
+    </div>
+
+    <div class="stat-block">
+      <h3>Session</h3>
+      <div class="stat-row"><span class="label">Épisodes</span>         <span class="value" id="s-ep-count">0</span></div>
+      <div class="stat-row"><span class="label">Taux de succès</span>   <span class="value val-green" id="s-win-rate">—</span></div>
+      <div class="stat-row"><span class="label">Longueur moy.</span>    <span class="value" id="s-avg-len">—</span></div>
+    </div>
+
+    <div class="goal-msg" id="goal-msg">🏆 OBJECTIF ATTEINT !</div>
+  </div>
+
+</div>
+
+<!-- Controls -->
+<div id="controls">
+  <button id="btn-play" onclick="togglePlay()">▶ Lancer</button>
+  <button onclick="stepOnce()">⏭ Pas à pas</button>
+  <button id="btn-reset" onclick="resetEpisode()">↺ Nouvel épisode</button>
+
+  <div class="ctrl-group">
+    <label>Vitesse <span id="lbl-speed">500ms</span></label>
+    <input type="range" id="speed" min="100" max="1500" value="500" step="100"
+           oninput="setSpeed(this.value)">
+  </div>
+
+  <div class="ctrl-group">
+    <label>γ = <span id="lbl-gamma">0.9</span></label>
+    <input type="range" id="gamma-slider" min="0.1" max="0.99" value="0.9" step="0.01"
+           oninput="setGamma(this.value)">
+  </div>
+</div>
+
+<div id="legend">
+  <div class="leg-item"><div class="leg-color" style="background:#2d6a2d"></div> V* élevée (bon)</div>
+  <div class="leg-item"><div class="leg-color" style="background:#7a2020"></div> V* basse (risquée)</div>
+  <div class="leg-item"><div class="leg-color" style="background:var(--yellow); border-color:var(--yellow)"></div> Objectif +1</div>
+  <div class="leg-item"><div class="leg-color" style="background:var(--red); border-color:var(--red)"></div> Piège −1</div>
+  <div class="leg-item"><div class="leg-color" style="background:#1c1c2e; border-color:#333"></div> Mur</div>
+  <div class="leg-item" style="color:var(--accent)">🤖 Robot</div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// MDP — MÊME ALGORITHME QUE LE NOTEBOOK PYTHON (tp4.ipynb)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const N_ROWS = 3, N_COLS = 4;
+let GAMMA = 0.9;
+const EPSILON = 1e-6;
+const OBSTACLE = [2, 2];
+const REWARDS = { '3,4':  1.0, '2,4': -1.0 };
+
+const ACTIONS = ['N', 'S', 'E', 'O'];
+const DIRS = { N:[1,0], S:[-1,0], E:[0,1], O:[0,-1] };
+const ARROWS_MAP = { N:'↑', S:'↓', E:'→', O:'←' };
+const TRANS_PROB = {
+  N: {N:0.8, E:0.1, O:0.1},
+  S: {S:0.8, E:0.1, O:0.1},
+  E: {E:0.8, N:0.1, S:0.1},
+  O: {O:0.8, N:0.1, S:0.1},
+};
+
+// All valid states (excluding obstacle)
+const STATES = [];
+for (let x = 1; x <= N_ROWS; x++)
+  for (let y = 1; y <= N_COLS; y++)
+    if (!(x === OBSTACLE[0] && y === OBSTACLE[1]))
+      STATES.push([x, y]);
+
+const N_S = STATES.length;
+const N_A = ACTIONS.length;
+
+// State → index map
+const S2I = {};
+STATES.forEach(([x,y], i) => { S2I[`${x},${y}`] = i; });
+
+function isValid(x, y) {
+  return x >= 1 && x <= N_ROWS && y >= 1 && y <= N_COLS
+      && !(x === OBSTACLE[0] && y === OBSTACLE[1]);
+}
+function nextState(x, y, dir) {
+  const [dx, dy] = DIRS[dir];
+  const nx = x + dx, ny = y + dy;
+  return isValid(nx, ny) ? [nx, ny] : [x, y];
+}
+
+// Build P[s'][s][a]  (same as Python: P = np.zeros((N_S, N_S, N_A)))
+function buildP() {
+  const P = Array.from({length: N_S}, () =>
+              Array.from({length: N_S}, () => new Float64Array(N_A)));
+  STATES.forEach(([x,y], i) => {
+    ACTIONS.forEach((a, ai) => {
+      Object.entries(TRANS_PROB[a]).forEach(([d, prob]) => {
+        const [nx, ny] = nextState(x, y, d);
+        const j = S2I[`${nx},${ny}`];
+        P[j][i][ai] += prob;
+      });
+    });
+  });
+  return P;
+}
+
+// Reward vector
+function buildR() {
+  return STATES.map(([x,y]) => REWARDS[`${x},${y}`] ?? 0.0);
+}
+
+// ── Value Iteration ──────────────────────────────────────────────────────────
+// Identique à: Q = (P * V[:,None,None]).sum(axis=0); Vn = R + gamma * Q.max(1)
+function valueIteration(P, R, gamma, eps) {
+  let V = new Float64Array(N_S);
+  let iters = 0;
+  for (let it = 0; it < 10000; it++) {
+    iters++;
+    // Q[i][a] = sum_j P[j][i][a] * V[j]
+    const Q = Array.from({length: N_S}, (_, i) =>
+      ACTIONS.map((_, a) =>
+        STATES.reduce((acc, _, j) => acc + P[j][i][a] * V[j], 0)
+      )
+    );
+    const Vnew = R.map((r, i) => r + gamma * Math.max(...Q[i]));
+    const delta = Math.max(...V.map((v, i) => Math.abs(Vnew[i] - v)));
+    V = new Float64Array(Vnew);
+    if (delta < eps) break;
+  }
+  // Policy: argmax_a Q[i][a]
+  const Q_final = Array.from({length: N_S}, (_, i) =>
+    ACTIONS.map((_, a) => STATES.reduce((acc, _, j) => acc + P[j][i][a] * V[j], 0))
+  );
+  const policy = Q_final.map(q => q.indexOf(Math.max(...q)));
+  return { V, policy, iters };
+}
+
+// ── Simulation stochastique ──────────────────────────────────────────────────
+function sampleDir(a, rng) {
+  const entries = Object.entries(TRANS_PROB[a]);
+  const r = rng();
+  let cum = 0;
+  for (const [d, p] of entries) {
+    cum += p;
+    if (r < cum) return d;
+  }
+  return entries[entries.length-1][0];
+}
+
+// Simple seeded RNG (Mulberry32)
+function makeRNG(seed) {
+  let s = seed >>> 0;
+  return () => { s |= 0; s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ÉTAT GLOBAL DE LA SIMULATION
+// ══════════════════════════════════════════════════════════════════
+let P, R_arr, mdp;
+let robotState = [1, 1];
+let stepCount  = 0;
+let cumReward  = 0.0;
+let isPlaying  = false;
+let timer      = null;
+let interval   = 500;
+let epCount    = 0, wins = 0;
+let epLengths  = [];
+let rng        = makeRNG(42);
+let path       = [[1,1]];
+let reachedGoal = false;
+
+function init() {
+  P      = buildP();
+  R_arr  = buildR();
+  mdp    = valueIteration(P, R_arr, GAMMA, EPSILON);
+  document.getElementById('lbl-iter').textContent   = mdp.iters;
+  document.getElementById('s-vi-iter').textContent  = mdp.iters;
+  document.getElementById('s-gamma').textContent    = GAMMA.toFixed(2);
+  document.getElementById('s-v11').textContent      = mdp.V[S2I['1,1']].toFixed(4);
+  buildGridDOM();
+  resetEpisode();
+}
+
+// ── DOM de la grille ──────────────────────────────────────────────────────────
+const CELL_PX = 110, GAP_PX = 6;
+
+function buildGridDOM() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  // Rows displayed top→bottom = x=3 down to x=1
+  for (let x = N_ROWS; x >= 1; x--) {
+    for (let y = 1; y <= N_COLS; y++) {
+      const div = document.createElement('div');
+      div.className = 'cell';
+      div.id = `cell-${x}-${y}`;
+      if (x === OBSTACLE[0] && y === OBSTACLE[1]) {
+        div.classList.add('obstacle');
+        div.innerHTML = `<span class="label">▪ MUR</span>`;
+      } else {
+        const key = `${x},${y}`;
+        const i   = S2I[key];
+        const v   = mdp.V[i];
+        const a   = ACTIONS[mdp.policy[i]];
+        div.innerHTML = `
+          <span class="coords">(${x},${y})</span>
+          <span class="v-star">V*=${v.toFixed(2)}</span>
+          <span class="arrow">${ARROWS_MAP[a]}</span>`;
+        if (REWARDS[key] !== undefined) {
+          const rc = REWARDS[key] > 0 ? '#ffd700' : '#ff4757';
+          div.innerHTML += `<span class="reward-label" style="color:${rc}">R=${REWARDS[key]>0?'+':''}${REWARDS[key].toFixed(0)}</span>`;
+        }
+        if (key === '3,4') div.classList.add('goal');
+        if (key === '2,4') div.classList.add('trap');
+        applyHeatmap(div, v);
+      }
+      grid.appendChild(div);
+    }
+  }
+  // Setup canvas for trail
+  const wrap  = grid.parentElement;
+  const canvas = document.getElementById('trail-canvas');
+  const W = N_COLS * CELL_PX + (N_COLS-1)*GAP_PX;
+  const H = N_ROWS * CELL_PX + (N_ROWS-1)*GAP_PX;
+  canvas.width  = W;
+  canvas.height = H;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  grid.style.position = 'relative';
+}
+
+// Map V* → background gradient colour
+function applyHeatmap(div, v) {
+  const vmin = Math.min(...mdp.V), vmax = Math.max(...mdp.V);
+  const t = (v - vmin) / (vmax - vmin);  // 0=min,1=max
+  // cold (dark red) → warm (dark green)
+  const r = Math.round(120 * (1-t) + 26  * t);
+  const g = Math.round(30  * (1-t) + 106 * t);
+  const b = Math.round(30  * (1-t) + 68  * t);
+  div.style.background = `rgb(${r},${g},${b})`;
+}
+
+// Convert grid coords to canvas pixel centre
+function cellCenter(x, y) {
+  // row 0 in DOM = x=3, so DOM row = N_ROWS - x
+  const col = y - 1;
+  const row = N_ROWS - x;
+  const cx = col * (CELL_PX + GAP_PX) + CELL_PX/2;
+  const cy = row * (CELL_PX + GAP_PX) + CELL_PX/2;
+  return [cx, cy];
+}
+
+function drawTrail() {
+  const canvas = document.getElementById('trail-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (path.length < 2) return;
+  for (let k = 0; k < path.length-1; k++) {
+    const [x1,y1] = path[k];
+    const [x2,y2] = path[k+1];
+    const [cx1,cy1] = cellCenter(x1,y1);
+    const [cx2,cy2] = cellCenter(x2,y2);
+    const alpha = Math.max(0.1, 0.7 * (k+1) / path.length);
+    ctx.beginPath();
+    ctx.moveTo(cx1, cy1);
+    ctx.lineTo(cx2, cy2);
+    ctx.strokeStyle = `rgba(0,212,255,${alpha})`;
+    ctx.lineWidth   = 3;
+    ctx.lineCap     = 'round';
+    ctx.stroke();
+    // Arrow head
+    if (k === path.length - 2) {
+      const angle = Math.atan2(cy2-cy1, cx2-cx1);
+      const size  = 8;
+      ctx.beginPath();
+      ctx.moveTo(cx2, cy2);
+      ctx.lineTo(cx2 - size*Math.cos(angle-0.4), cy2 - size*Math.sin(angle-0.4));
+      ctx.lineTo(cx2 - size*Math.cos(angle+0.4), cy2 - size*Math.sin(angle+0.4));
+      ctx.closePath();
+      ctx.fillStyle = `rgba(0,212,255,${alpha})`;
+      ctx.fill();
+    }
+  }
+}
+
+function updateRobotDOM() {
+  // Remove old robot icon
+  document.querySelectorAll('.robot-icon').forEach(e => e.remove());
+  document.querySelectorAll('.cell').forEach(c => {
+    c.classList.remove('robot', 'visited');
+  });
+
+  // Mark visited
+  path.forEach(([x,y]) => {
+    const cell = document.getElementById(`cell-${x}-${y}`);
+    if (cell) cell.classList.add('visited');
+  });
+
+  // Place robot
+  const [rx, ry] = robotState;
+  const cell = document.getElementById(`cell-${rx}-${ry}`);
+  if (cell) {
+    cell.classList.add('robot');
+    cell.classList.remove('visited');
+    const icon = document.createElement('div');
+    icon.className = 'robot-icon';
+    icon.textContent = '🤖';
+    cell.appendChild(icon);
+  }
+
+  drawTrail();
+}
+
+function updateStats() {
+  const [x, y] = robotState;
+  const key = `${x},${y}`;
+  const i   = S2I[key] ?? S2I['3,4'];
+  const v   = mdp.V[i];
+  const a   = ACTIONS[mdp.policy[i]];
+
+  document.getElementById('s-step').textContent  = stepCount;
+  document.getElementById('s-state').textContent = `(${x},${y})`;
+  document.getElementById('s-vstar').textContent = v.toFixed(4);
+  document.getElementById('s-action').textContent= ARROWS_MAP[a];
+  document.getElementById('s-cumrew').textContent = cumReward.toFixed(2);
+
+  // Immediate reward
+  const r = REWARDS[key] ?? 0;
+  const rewEl = document.getElementById('s-reward');
+  rewEl.textContent = r !== 0 ? (r > 0 ? `+${r}` : r) : '0';
+  rewEl.className = 'value ' + (r > 0 ? 'val-green' : r < 0 ? 'val-red' : 'val-white');
+
+  // Reward bar (capped ±5 for display)
+  const pct = Math.min(100, Math.max(0, (cumReward + 5) / 10 * 100));
+  document.getElementById('reward-bar').style.width = pct + '%';
+  document.getElementById('reward-bar').style.background =
+      cumReward >= 0 ? 'var(--green)' : 'var(--red)';
+
+  // Session
+  document.getElementById('s-ep-count').textContent = epCount;
+  if (epCount > 0) {
+    document.getElementById('s-win-rate').textContent = `${Math.round(wins/epCount*100)}%`;
+    const avg = epLengths.reduce((a,b)=>a+b,0)/epLengths.length;
+    document.getElementById('s-avg-len').textContent = avg.toFixed(1);
+  }
+
+  // Goal message
+  const goalMsg = document.getElementById('goal-msg');
+  goalMsg.style.display = reachedGoal ? 'block' : 'none';
+  document.getElementById('episode-badge').textContent =
+      `Épisode ${epCount + 1}`;
+}
+
+// ── Perform one step ──────────────────────────────────────────────────────────
+function doStep() {
+  if (reachedGoal) { resetEpisode(); return; }
+  const [x, y] = robotState;
+  const key = `${x},${y}`;
+  if (S2I[key] === undefined) return;
+
+  const ai  = mdp.policy[S2I[key]];
+  const a   = ACTIONS[ai];
+  const eff = sampleDir(a, rng);
+  const [nx, ny] = nextState(x, y, eff);
+  const r = REWARDS[`${nx},${ny}`] ?? 0;
+
+  robotState = [nx, ny];
+  stepCount++;
+  cumReward += r;
+  path.push([nx, ny]);
+
+  updateRobotDOM();
+  updateStats();
+
+  if (nx === 3 && ny === 4) {
+    reachedGoal = true;
+    epCount++; wins++;
+    epLengths.push(stepCount);
+    updateStats();
+    if (isPlaying) setTimeout(resetEpisode, 1800);
+  }
+  if (nx === 2 && ny === 4 && !reachedGoal) {
+    // Trap — continue but show red
+    epCount++;
+    epLengths.push(stepCount);
+    reachedGoal = true;
+    if (isPlaying) setTimeout(resetEpisode, 1400);
+  }
+  if (stepCount >= 60 && !reachedGoal) {
+    epCount++;
+    epLengths.push(stepCount);
+    reachedGoal = true;
+    if (isPlaying) setTimeout(resetEpisode, 1000);
+  }
+}
+
+function resetEpisode() {
+  robotState  = [1, 1];
+  stepCount   = 0;
+  cumReward   = 0.0;
+  path        = [[1, 1]];
+  reachedGoal = false;
+  rng         = makeRNG(Date.now() & 0xffffffff);
+  document.getElementById('goal-msg').style.display = 'none';
+
+  // Clear trail canvas
+  const canvas = document.getElementById('trail-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  updateRobotDOM();
+  updateStats();
+}
+
+function stepOnce() { if (!isPlaying) doStep(); }
+
+function togglePlay() {
+  isPlaying = !isPlaying;
+  document.getElementById('btn-play').textContent = isPlaying ? '⏸ Pause' : '▶ Lancer';
+  if (isPlaying) scheduleStep();
+  else { clearTimeout(timer); }
+}
+
+function scheduleStep() {
+  if (!isPlaying) return;
+  doStep();
+  timer = setTimeout(scheduleStep, interval);
+}
+
+function setSpeed(v) {
+  interval = parseInt(v);
+  document.getElementById('lbl-speed').textContent = v + 'ms';
+}
+
+function setGamma(v) {
+  GAMMA = parseFloat(v);
+  document.getElementById('lbl-gamma').textContent  = GAMMA.toFixed(2);
+  document.getElementById('s-gamma').textContent    = GAMMA.toFixed(2);
+  // Recompute VI with new gamma
+  const wasPlaying = isPlaying;
+  if (isPlaying) togglePlay();
+  mdp = valueIteration(P, R_arr, GAMMA, EPSILON);
+  document.getElementById('lbl-iter').textContent  = mdp.iters;
+  document.getElementById('s-vi-iter').textContent = mdp.iters;
+  document.getElementById('s-v11').textContent     = mdp.V[S2I['1,1']].toFixed(4);
+  epCount = 0; wins = 0; epLengths = [];
+  buildGridDOM();
+  resetEpisode();
+  if (wasPlaying) togglePlay();
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+window.addEventListener('load', init);
+</script>
+</body>
+</html>
